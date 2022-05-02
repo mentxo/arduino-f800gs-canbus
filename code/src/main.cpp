@@ -23,11 +23,11 @@
 
 #define REMOTE_ON_MILLIS 7500
 
-//#define STATUS
+#define STATUS
 //#define TEST
 //#define DEBUG
 //#define INFO
-#define VERBOSE
+//#define VERBOSE
 
 void initSerial();
 void initCanBus();
@@ -170,7 +170,7 @@ void setup()
   eepromRecovery();
   initCanBus();
   initStates();
-
+ 
   if (light_mode == LIGHT_MODE_ALWAYS)
     light_on = true;
 
@@ -179,7 +179,6 @@ void setup()
 
   relay(REMOTE_PIN, false);
   relay(LIGHT_PIN, false);
-
 }
 
 void loop()
@@ -198,7 +197,6 @@ void loop()
     relay(LIGHT_PIN, true);
   else
     relay(LIGHT_PIN, false);
-
 
   if (startRemoteMillis > 0 && ((millis() - startRemoteMillis) <= REMOTE_ON_MILLIS))
   {
@@ -224,7 +222,8 @@ void initSerial()
 {
   Serial.begin(115200);
 #ifdef LEONARDO
-  while (!Serial);
+  while (!Serial)
+    ;
 #endif
 }
 
@@ -236,7 +235,7 @@ void initCanBus()
 #ifdef TEST
   bus.setLoopbackMode();
 #else
-  //bus.setNormalMode();
+  // bus.setNormalMode();
   bus.setListenOnlyMode();
 #endif
 
@@ -387,7 +386,6 @@ void statusReport()
 
   Serial.println("------------------------------------------------------------------------");
 }
-
 
 #endif
 
@@ -860,7 +858,6 @@ void processActionsHighBeam(unsigned long newMillis)
     high_light_state_current.processed = true;
   }
 }
-
 
 bool checkCanBusDataMask(struct can_frame frameCheck, uint32_t can_id, int pos, byte mask, byte value_mask, bool &value)
 {
