@@ -13,11 +13,14 @@
                 "c:/Code/repos/github/mentxo/arduino-f800gs-canbus/code/lib/mcp2515",
                 "C:/Users/mentx/.platformio/packages/framework-arduino-avr/libraries/SPI/src",
                 "C:/Users/mentx/.platformio/packages/framework-arduino-avr/libraries/EEPROM/src",
+                "c:/Code/repos/github/mentxo/arduino-f800gs-canbus/code/.pio/libdeps/nano/avr-debugger/avr8-stub",
                 "C:/Users/mentx/.platformio/packages/framework-arduino-avr/cores/arduino",
                 "C:/Users/mentx/.platformio/packages/framework-arduino-avr/variants/eightanaloginputs",
+                "c:/Code/repos/github/mentxo/arduino-f800gs-canbus/code/.pio/libdeps/nano/avr-debugger@1.1.0/avr8-stub",
                 "C:/Users/mentx/.platformio/packages/framework-arduino-avr/libraries/HID/src",
                 "C:/Users/mentx/.platformio/packages/framework-arduino-avr/libraries/SoftwareSerial/src",
                 "C:/Users/mentx/.platformio/packages/framework-arduino-avr/libraries/Wire/src",
+                "C:/Users/mentx/.platformio/packages/tool-unity",
                 ""
             ],
             "browse": {
@@ -28,17 +31,20 @@
                     "c:/Code/repos/github/mentxo/arduino-f800gs-canbus/code/lib/mcp2515",
                     "C:/Users/mentx/.platformio/packages/framework-arduino-avr/libraries/SPI/src",
                     "C:/Users/mentx/.platformio/packages/framework-arduino-avr/libraries/EEPROM/src",
+                    "c:/Code/repos/github/mentxo/arduino-f800gs-canbus/code/.pio/libdeps/nano/avr-debugger/avr8-stub",
                     "C:/Users/mentx/.platformio/packages/framework-arduino-avr/cores/arduino",
                     "C:/Users/mentx/.platformio/packages/framework-arduino-avr/variants/eightanaloginputs",
+                    "c:/Code/repos/github/mentxo/arduino-f800gs-canbus/code/.pio/libdeps/nano/avr-debugger@1.1.0/avr8-stub",
                     "C:/Users/mentx/.platformio/packages/framework-arduino-avr/libraries/HID/src",
                     "C:/Users/mentx/.platformio/packages/framework-arduino-avr/libraries/SoftwareSerial/src",
                     "C:/Users/mentx/.platformio/packages/framework-arduino-avr/libraries/Wire/src",
+                    "C:/Users/mentx/.platformio/packages/tool-unity",
                     ""
                 ]
             },
             "defines": [
                 "PLATFORMIO=50205",
-                "ARDUINO_AVR_PRO",
+                "ARDUINO_AVR_NANO",
                 "F_CPU=16000000L",
                 "ARDUINO_ARCH_AVR",
                 "ARDUINO=10808",
