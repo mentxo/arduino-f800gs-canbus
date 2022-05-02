@@ -1,13 +1,14 @@
+#include <Arduino.h>
 #include <SPI.h>
 #include <mcp2515.h>
 #include <EEPROM.h>
 
 //#define LEONARDO
 //#define ID_CAN_FILTER 0x10C 
-//#define INTERRUPT 0
+//#define INTERRUPT_PIN 2
 #define CS_PIN 10
-#define LIGHT_PIN 3
-#define REMOTE_PIN 4
+#define LIGHT_PIN 4
+#define REMOTE_PIN 5
 
 #define MILLIS_TAPS 325
 
@@ -20,12 +21,37 @@
 
 #define REMOTE_ON_MILLIS 7500
 
+//#define STATUS
+//#define TEST
+//#define DEBUG
+//#define INFO
+#define VERBOSE
 
- #define STATUS
-// #define TEST
-// #define DEBUG
-// #define INFO
- //#define VERBOSE
+void initSerial();
+void initCanBus();
+void initPins();
+void initStates();
+void eepromRecovery();
+void statusReport();
+void processCanBusInfoStates(struct can_frame frame2process, unsigned long newMillis);
+void processCanBus();
+void processCanBusMessage(struct can_frame frame2process);
+void processCanBusTurnStates(struct can_frame frame2process, unsigned long newMillis);
+void processCanBusHighBeamStates(struct can_frame frame2process, unsigned long newMillis);
+void processCanBusEnineRPM(struct can_frame frame2process, unsigned long newMillis);
+void processActionsInfo(unsigned long newMillis);
+void processActionsEngineStart(unsigned long newMillis);
+void processActionsTurn(unsigned long newMillis);
+void processActionsHighBeam(unsigned long newMillis);
+void saveInEeprom(int address, int value);
+bool checkCanBusDataMask(struct can_frame frameCheck, uint32_t can_id, int pos, byte mask, byte value_mask, bool &value);
+bool getCanBusData(struct can_frame frameCheck, uint32_t can_id, int pos, byte &value);
+
+void irqHandler();
+void processCanBusInterrupt();
+
+void serialDataOutput(struct can_frame frameOutput);
+
 
 enum class turn_states
 {
@@ -96,7 +122,6 @@ const uint32_t ID_CAN_CONTROLS = 0x2D0;
 const uint32_t ID_CAN_ENGINE = 0x10C;
 
 // A bitmasks for toggle bits.
-
 const byte VALUE_CAN_TURN_OFF = 0b00001000;
 const byte VALUE_CAN_TURN_LEFT = 0b00010000;
 const byte VALUE_CAN_TURN_RIGHT = 0b00100000;
@@ -106,7 +131,6 @@ const byte VALUE_CAN_TURN_MASK = 0b00111000;
 const byte VALUE_CAN_HIGH_LIGHT_ON = 0b00000001;
 const byte VALUE_CAN_HIGH_LIGHT_OFF = 0b00000010;
 const byte VALUE_CAN_HIGH_LIGHT_MASK = 0b00000011;
-
 
 const byte VALUE_CAN_INFO_SHORT = 0b00000001;
 const byte VALUE_CAN_INFO_LONG = 0b00000010;
@@ -124,7 +148,6 @@ bool light_on = false;
 
 unsigned int remote_modes_address = 0;
 byte remote_mode = REMOTE_MODE_CONTINUOUS;
-bool remote_on = false;
 
 bool turn_left_on = false;
 bool turn_right_on = false;
@@ -147,26 +170,49 @@ void setup()
   initStates();
 }
 
-void initSerial()
+void loop()
 {
-#ifdef VERBOSE
-    Serial.begin(115200);
-#endif
-#ifdef  DEBUG 
-    Serial.begin(115200);
-#endif
-#ifdef  INFO
-    Serial.begin(115200);
-#endif
 #ifdef STATUS
-    Serial.begin(115200);
+  statusReport();
 #endif
 
+#ifdef INTERRUPT_PIN
+  processCanBusInterrupt();
+#else
+  processCanBus();
+#endif
+
+  if (light_on && engine_state_current.state.started)
+    digitalWrite(LIGHT_PIN, LOW);
+  else
+    digitalWrite(LIGHT_PIN, HIGH);
+
+  if (startRemoteMillis > 0 && ((millis() - startRemoteMillis) <= REMOTE_ON_MILLIS))
+  {
+    if (remote_mode == REMOTE_MODE_CONTINUOUS)
+      digitalWrite(REMOTE_PIN, LOW);
+    else if (remote_mode == REMOTE_MODE_BLINK && ((int)(millis() - startRemoteMillis / 1000)) % 2 == 0)
+      digitalWrite(REMOTE_PIN, LOW);
+    else
+      digitalWrite(REMOTE_PIN, HIGH);
+  }
+  else
+  {
+    digitalWrite(REMOTE_PIN, HIGH);
+    startRemoteMillis = 0;
+  }
+
+#ifdef TEST
+    writeTest();
+#endif
+}
+
+void initSerial()
+{
+  Serial.begin(115200);
 #ifdef LEONARDO
     while (!Serial);
 #endif
-
-
 }
 
 void initCanBus()
@@ -180,8 +226,9 @@ void initCanBus()
   bus.setNormalMode();
 #endif
 
-#ifdef INTERRUPT
-  attachInterrupt(INTERRUPT, irqHandler, FALLING);
+#ifdef INTERRUPT_PIN
+  pinMode(INTERRUPT_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), irqHandler, FALLING);
 #endif
 }
 
@@ -241,51 +288,10 @@ void eepromRecovery()
   }
 }
 
-void loop()
-{
-#ifdef STATUS
-  statusReport();
-#endif
-
-#ifdef INTERRUPT
-  processCanBusInterrupt();
-#else
-  processCanBus();
-#endif
-
-  if (light_on && engine_state_current.state.started)
-    digitalWrite(LIGHT_PIN, LOW);
-  else
-    digitalWrite(LIGHT_PIN, HIGH);
-
-  if (remote_on)
-    digitalWrite(REMOTE_PIN, LOW);
-  else
-    digitalWrite(REMOTE_PIN, HIGH);
-
-  if (startRemoteMillis > 0 && ((millis() - startRemoteMillis) <= REMOTE_ON_MILLIS))
-  {
-    if (remote_mode == REMOTE_MODE_CONTINUOUS)
-      digitalWrite(REMOTE_PIN, LOW);
-    else if (remote_mode == REMOTE_MODE_BLINK && ((int)(millis() - startRemoteMillis / 1000)) % 2 == 0)
-      digitalWrite(REMOTE_PIN, LOW);
-    else
-      digitalWrite(REMOTE_PIN, HIGH);
-  }
-  else
-  {
-    digitalWrite(REMOTE_PIN, HIGH);
-  }
-
-#ifdef TEST
-    writeTest();
-#endif
-}
-
 #ifdef STATUS
 void statusReport()
 {
-  if (!(millis() - statusMillis) > 1000)
+  if (!((millis() - statusMillis) > 1000))
     return;
 
   statusMillis = millis();
@@ -340,16 +346,16 @@ void statusReport()
     Serial.println("off");
 
   Serial.print("Remote: ");
-  if (remote_on)
+  if (startRemoteMillis>0)
     Serial.println("on");
-  else if (!remote_on)
+  else
     Serial.println("off");
 
   Serial.println("------------------------------------------------------------------------");
 }
 #endif
 
-#ifdef INTERRUPT
+#ifdef INTERRUPT_PIN
 
 volatile bool interrupt = false;
 
@@ -399,7 +405,6 @@ void processCanBus()
 }
 
 #endif
-
 void processCanBusMessage(struct can_frame frame2process)
 {
 
@@ -419,9 +424,8 @@ void processCanBusMessage(struct can_frame frame2process)
   processActionsEngineStart(newMillis);
 }
 
-void processCanBusInfoStates(struct can_frame frame2process, unsigned long newMillis)
-{
-  String state = "OFF";
+void processCanBusInfoStates(struct can_frame frame2process, unsigned long currentMillis)
+{  
   bool info_short = false;
   bool info_long = false;
   bool info_off = false;
@@ -430,36 +434,36 @@ void processCanBusInfoStates(struct can_frame frame2process, unsigned long newMi
   bool info_long_checked = checkCanBusDataMask(frame2process, ID_CAN_CONTROLS, 5, VALUE_CAN_INFO_MASK, VALUE_CAN_INFO_LONG, info_long);
   bool info_off_checked = checkCanBusDataMask(frame2process, ID_CAN_CONTROLS, 5, VALUE_CAN_INFO_MASK, VALUE_CAN_INFO_OFF, info_off);
 
-  if (!info_short_checked || !info_long_checked || !info_off_checked)
+  if (!(info_short_checked || info_long_checked || info_off_checked))
     return;
 
   if (info_short && info_state_current.state != info_states::SHORT)
   {
-    info_state_current.previous_interval_millis = newMillis - info_state_current.millis;
-    info_state_current.millis = newMillis;
+    info_state_current.previous_interval_millis = currentMillis - info_state_current.millis;
+    info_state_current.millis = currentMillis;
     info_state_current.processed = false;
     info_state_current.previous_state = info_state_current.state;
     info_state_current.state = info_states::SHORT;
   }
   else if (info_long && info_state_current.state != info_states::LONG)
   {
-    info_state_current.previous_interval_millis = newMillis - info_state_current.millis;
-    info_state_current.millis = newMillis;
+    info_state_current.previous_interval_millis = currentMillis - info_state_current.millis;
+    info_state_current.millis = currentMillis;
     info_state_current.processed = false;
     info_state_current.previous_state = info_state_current.state;
     info_state_current.state = info_states::LONG;
   }
   else if (info_off && info_state_current.state != info_states::OFF)
   {
-    info_state_current.previous_interval_millis = newMillis - info_state_current.millis;
-    info_state_current.millis = newMillis;
+    info_state_current.previous_interval_millis = currentMillis - info_state_current.millis;
+    info_state_current.millis = currentMillis;
     info_state_current.processed = false;
     info_state_current.previous_state = info_state_current.state;
     info_state_current.state = info_states::OFF;
   }
 #ifdef DEBUG 
   serialCanBusStateOutput("INFO", (char)info_state_current.state, info_state_current.millis, newMillis);
-  #endif
+#endif
 }
 
 void processCanBusTurnStates(struct can_frame frame2process, unsigned long newMillis)
@@ -474,7 +478,7 @@ void processCanBusTurnStates(struct can_frame frame2process, unsigned long newMi
   bool turn_left_checked = checkCanBusDataMask(frame2process, ID_CAN_LIGHTS, 7, VALUE_CAN_TURN_MASK, VALUE_CAN_TURN_LEFT, turn_left);
   bool turn_both_checked = checkCanBusDataMask(frame2process, ID_CAN_LIGHTS, 7, VALUE_CAN_TURN_MASK, VALUE_CAN_TURN_BOTHT, turn_both);
 
-  if (!turn_off_checked || !turn_right_checked || !turn_left_checked || !turn_both_checked)
+  if (!(turn_off_checked || turn_right_checked || turn_left_checked || turn_both_checked))
     return;
 
   if (turn_off && turn_state_current.state != turn_states::OFF)
@@ -516,14 +520,14 @@ void processCanBusTurnStates(struct can_frame frame2process, unsigned long newMi
 
 void processCanBusHighBeamStates(struct can_frame frame2process, unsigned long newMillis)
 {
-  String state = "OFF";
+
   bool high_light_on = false;
   bool high_light_off = false;
 
   bool high_light_on_checked = checkCanBusDataMask(frame2process, ID_CAN_LIGHTS, 6, VALUE_CAN_HIGH_LIGHT_MASK, VALUE_CAN_HIGH_LIGHT_ON, high_light_on);
   bool high_light_off_checked = checkCanBusDataMask(frame2process, ID_CAN_LIGHTS, 6, VALUE_CAN_HIGH_LIGHT_MASK, VALUE_CAN_HIGH_LIGHT_OFF, high_light_off);
 
-  if (!high_light_on_checked || !high_light_on_checked)
+  if (!(high_light_on_checked || high_light_off_checked))
     return;
 
   if (high_light_on && high_light_state_current.state != high_light_states::ON)
@@ -555,7 +559,7 @@ void processCanBusEnineRPM(struct can_frame frame2process, unsigned long newMill
   bool checked_data2 = getCanBusData(frame2process, ID_CAN_ENGINE, 2, data2);
   bool checked_data3 = getCanBusData(frame2process, ID_CAN_ENGINE, 3, data3);
 
-  if (!checked_data2 || !checked_data3)
+  if (!(checked_data2 || checked_data3))
     return;
 
   uint32_t rpm = uint32_t((double(data3) * 256 + double(data2)) / 4);
@@ -583,7 +587,7 @@ void processActionsInfo(unsigned long newMillis)
   unsigned long current_interval = newMillis - info_state_current.millis;
   unsigned long previous_interval_millis = info_state_current.previous_interval_millis;
 
-  if (info_state_current.state == info_states::OFF && info_state_current.previous_state == info_states::SHORT & previous_interval_millis < MILLIS_TAPS && executed_now && !processed)
+  if (info_state_current.state == info_states::OFF && info_state_current.previous_state == info_states::SHORT && previous_interval_millis < MILLIS_TAPS && executed_now && !processed)
   {
     totalInfoShorts++;
   }
@@ -661,15 +665,14 @@ void processActionsEngineStart(unsigned long newMillis)
   bool executed_now = (engine_state_current.millis == newMillis);
   bool processed = engine_state_current.processed;
 
-  unsigned long current_interval = newMillis - engine_state_current.millis;
-  unsigned long previous_interval_millis = engine_state_current.previous_interval_millis;
-
   if (engine_state_current.state.started && !engine_state_current.previous_state.started && executed_now && !processed)
   {
     engine_state_current.processed = true;
 #ifdef INFO 
       Serial.println("##################### ENGINE START ###############################");
 #endif
+    //TODO: Action on engine start
+
   }
   else if (!engine_state_current.state.started && engine_state_current.previous_state.started && executed_now && !processed)
   {
@@ -677,6 +680,7 @@ void processActionsEngineStart(unsigned long newMillis)
 #ifdef INFO 
       Serial.println("##################### ENGINE STOP ###############################");
 #endif
+    //TODO: Action on engine stop
   }
 }
 
@@ -738,7 +742,7 @@ void processActionsHighBeam(unsigned long newMillis)
   unsigned long current_interval = newMillis - high_light_state_current.millis;
   unsigned long previous_interval_millis = high_light_state_current.previous_interval_millis;
 
-  if (high_light_state_current.state == high_light_states::OFF && previous_interval_millis < MILLIS_TAPS && executed_now && !processed)
+  if (high_light_state_current.state == high_light_states::OFF && high_light_state_current.previous_state == high_light_states::ON  && previous_interval_millis < MILLIS_TAPS && executed_now && !processed)
   {
     totalHighBeamShorts++;
   }
@@ -801,8 +805,7 @@ void processActionsHighBeam(unsigned long newMillis)
       Serial.println("******************** LIGHT MODE OFF ***************************");
 #endif
       light_mode = LIGHT_MODE_OFF;
-      saveInEeprom(light_mode_address, light_mode);
-      digitalWrite(LIGHT_PIN, HIGH);
+      saveInEeprom(light_mode_address, light_mode);      
       light_on = false;
     }
     else if (turn_both_on)
@@ -811,8 +814,7 @@ void processActionsHighBeam(unsigned long newMillis)
       Serial.println("******************** LIGHT MODE ALWAYS *************************");
 #endif
       light_mode = LIGHT_MODE_ALWAYS;
-      saveInEeprom(light_mode_address, light_mode);
-      digitalWrite(LIGHT_PIN, LOW);
+      saveInEeprom(light_mode_address, light_mode);     
       light_on = true;
     }
   }
@@ -868,7 +870,7 @@ bool checkCanBusDataMask(struct can_frame frameCheck, uint32_t can_id, int pos, 
   return true;
 }
 
-byte getCanBusData(struct can_frame frameCheck, uint32_t can_id, int pos, byte &value)
+bool getCanBusData(struct can_frame frameCheck, uint32_t can_id, int pos, byte &value)
 {
 
   if (frameCheck.can_id != can_id)
@@ -880,6 +882,7 @@ byte getCanBusData(struct can_frame frameCheck, uint32_t can_id, int pos, byte &
 }
 
 #ifdef DEBUG
+void serialCanBusStateOutput(String name, char state, unsigned long millis, unsigned long newMillis);
 void serialCanBusStateOutput(String name, char state, unsigned long millis, unsigned long newMillis)
 {
 
@@ -892,6 +895,7 @@ void serialCanBusStateOutput(String name, char state, unsigned long millis, unsi
   Serial.println(")");
 }
 
+void serialCanBusNumberOutput(String name, int value, unsigned long millis, unsigned long newMillis);
 void serialCanBusNumberOutput(String name, int value, unsigned long millis, unsigned long newMillis)
 {
   Serial.print(name + ": ");
@@ -903,6 +907,7 @@ void serialCanBusNumberOutput(String name, int value, unsigned long millis, unsi
   Serial.println(")");
 }
 
+void serialDataMaskOutput(uint32_t can_id, int pos, byte mask, byte value_mask, byte data, byte data_mask);
 void serialDataMaskOutput(uint32_t can_id, int pos, byte mask, byte value_mask, byte data, byte data_mask)
 {
   Serial.print("checkBusData --> Match ID & Data[");
@@ -952,6 +957,7 @@ void serialDataOutput(struct can_frame frameOutput)
 #ifdef TEST
 unsigned long testMilis;
 unsigned int iteration;
+void writeTest();
 void writeTest()
 {
   unsigned long newMilis = millis();

@@ -1,6 +1,0 @@
-{
-    "port": "COM16",
-    "configuration": "cpu=16MHzatmega328",
-    "board": "arduino:avr:pro",
-    "sketch": "CanbusLighs\\CanbusLighs.ino"
-}
